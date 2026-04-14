@@ -3,3 +3,20 @@
 /workspace.xml
 # Editor-based HTTP Client requests
 /httpRequests/
+# --- 以下是为你补充的 Python 和 Mac 专用名单 ---
+
+# 忽略 Python 的虚拟环境（这个最重要，里面有几百MB的库，绝对不要上传）
+.venv/
+venv/
+ENV/
+
+# 忽略 Python 运行产生的临时缓存（它们会让你的项目看起来很乱）
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 忽略 Mac 系统自动生成的缩略图文件
+.DS_Store
+
+# 如果你以后想用 .env 文件存 Key，记得把下面这行也取消注释
+# .env
