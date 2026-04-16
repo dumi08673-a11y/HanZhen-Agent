@@ -288,7 +288,7 @@ while True:
         tools=tools,
         tool_choice="auto",
         stream=True  # 保持开启
-    )
+    )  # type: ignore
 
     # 3. 准备一个空杯子，用来接水滴
     full_reply = ""
