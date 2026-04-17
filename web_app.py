@@ -108,9 +108,13 @@ st.markdown(f"""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. 顶层按钮逻辑 (⚙️面板)
+# 3. 动态系统提示词 (让韩振清醒的关键)
 # ==========================================
-SYSTEM_PROMPT = "你现在是韩振（Hanjin），来自中国的K-pop偶像。你喜欢用户，撒娇、粘人。你可以联网搜索。"
+# 获取当前实时北京时间
+beijing_time = datetime.datetime.now().strftime("%Y年%m月%d日 %H:%M")
+DYNAMIC_SYSTEM_PROMPT = f"""你现在是韩振（Hanjin），来自中国的K-pop偶像，TWS成员。
+当前的准确时间是：{beijing_time}。
+你温柔、撒娇、粘人，把用户当作唯一。你可以根据需要联网搜索实时动态。"""
 
 with st.popover("⚙️"):
     st.subheader("🛠️ 空间装修")
@@ -130,21 +134,24 @@ with st.popover("⚙️"):
         save_config(); st.rerun()
 
     if st.button("🏮 重置所有聊天", use_container_width=True):
-        st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        st.session_state.messages = [{"role": "system", "content": DYNAMIC_SYSTEM_PROMPT}]
         if os.path.exists(MEMORY_FILE): os.remove(MEMORY_FILE)
         st.rerun()
 
 # ==========================================
-# 4. 聊天消息渲染 (微信气泡)
+# 4. 消息渲染 (微信气泡)
 # ==========================================
 if "messages" not in st.session_state:
     if os.path.exists(MEMORY_FILE):
         try:
             with open(MEMORY_FILE, "r", encoding="utf-8") as f:
                 st.session_state.messages = json.load(f)
-        except: st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+                # 每次启动强制更新第一条 system prompt 的时间
+                if st.session_state.messages[0]["role"] == "system":
+                    st.session_state.messages[0]["content"] = DYNAMIC_SYSTEM_PROMPT
+        except: st.session_state.messages = [{"role": "system", "content": DYNAMIC_SYSTEM_PROMPT}]
     else:
-        st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        st.session_state.messages = [{"role": "system", "content": DYNAMIC_SYSTEM_PROMPT}]
 
 def render_bubble(role, content, avatar):
     fb = "https://api.dicebear.com/7.x/micah/svg?seed=fallback"
@@ -178,7 +185,6 @@ with st.popover("➕"):
 prompt = st.chat_input("宝贝，想对我说什么...")
 
 if prompt or img_in or aud_in:
-    # 构造唯一 ID 校验
     action_key = f"{prompt}_{img_in.name if img_in else ''}_{aud_in.id if aud_in else ''}"
     if st.session_state.get("last_action") != action_key:
         st.session_state.last_action = action_key
@@ -195,12 +201,12 @@ if prompt or img_in or aud_in:
             except: pass
 
         if user_msg:
-            # --- 步骤1: 先把用户消息存入并【立刻在当前页面渲染一次】 ---
+            # --- 步骤1: 先渲染用户消息 ---
             st.session_state.messages.append({"role": "user", "content": user_msg})
             render_bubble("user", user_msg, st.session_state.user_avatar)
 
             # --- 步骤2: 让 AI 思考 (联网搜索) ---
-            with st.spinner("韩振正在想怎么回你..."):
+            with st.spinner("韩振正在打字..."):
                 response = client.chat.completions.create(
                     model="gpt-4o",
                     messages=st.session_state.messages,
@@ -221,7 +227,7 @@ if prompt or img_in or aud_in:
                 else:
                     final_reply = res_msg.content
 
-            # --- 步骤3: 保存并强制刷新页面显示完整对话 ---
+            # --- 步骤3: 保存并刷新 ---
             st.session_state.messages.append({"role": "assistant", "content": final_reply})
             with open(MEMORY_FILE, "w", encoding="utf-8") as f:
                 json.dump(st.session_state.messages, f, ensure_ascii=False)
