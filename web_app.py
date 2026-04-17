@@ -6,11 +6,21 @@ import base64
 from openai import OpenAI
 
 # ==========================================
-# 0. 基础环境
+# 0. 强力初始化与重置 (核心：解决崩溃)
 # ==========================================
 client = OpenAI()
 MEMORY_FILE = "hanzhen_memory.json"
 CONFIG_FILE = "hanzhen_config.json"
+
+# 如果你想彻底重来，运行这一版会自动帮你清理一次
+# 只要点击侧边栏的重置，文件就会被物理删除
+def hard_reset():
+    for f in [MEMORY_FILE, CONFIG_FILE]:
+        if os.path.exists(f):
+            try: os.remove(f)
+            except: pass
+    st.session_state.clear()
+    st.rerun()
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -20,23 +30,14 @@ def load_config():
         except: pass
     return {}
 
-def save_config():
-    config_data = {
-        "bg_color": st.session_state.get("bg_color"),
-        "bg_image_base64": st.session_state.get("bg_image_base64"),
-        "hz_avatar": st.session_state.get("hz_avatar"),
-        "user_avatar": st.session_state.get("user_avatar")
-    }
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(config_data, f, ensure_ascii=False)
-
 config = load_config()
 
 # ==========================================
-# 1. 页面配置与 CSS (物理隔绝，防止重叠)
+# 1. 极致稳固的 UI 布局
 # ==========================================
 st.set_page_config(page_title="韩振的私密空间", page_icon="🎤", layout="centered")
 
+# 状态初始化
 if "bg_color" not in st.session_state:
     st.session_state.bg_color = config.get("bg_color", "#f4f6f8")
 if "bg_image_base64" not in st.session_state:
@@ -55,141 +56,116 @@ st.markdown(f"""
     .stApp {{ {bg_style} }}
     #MainMenu, footer, header {{ display: none !important; }}
     
-    /* 聊天区上下留出空白，防止和固定按钮打架 */
+    /* 聊天区上下留白，确保不被固定按钮挡住 */
     [data-testid="stMainBlockContainer"] {{
-        padding-top: 100px !important;
-        padding-bottom: 150px !important; 
+        padding-top: 70px !important;
+        padding-bottom: 120px !important; 
     }}
 
-    /* 左上角齿轮：绝对定位 */
-    div.stElementContainer:has(div[data-testid="stPopover"]) {{
+    /* 左上角齿轮定位 */
+    .gear-container {{
         position: fixed;
-        top: 30px;
-        left: 30px;
+        top: 15px;
+        left: 15px;
         z-index: 999999;
     }}
-
-    /* 左下角➕号：绝对定位 */
-    div.stElementContainer:has(div[data-testid="stPopover"]) ~ div.stElementContainer:has(div[data-testid="stPopover"]) {{
-        position: fixed !important;
-        bottom: 30px !important; 
-        left: 50% !important;
-        transform: translateX(-380px) !important;
-        z-index: 999998 !important;
-    }}
     
-    /* 圆形按钮样式 */
+    /* 左下角➕号定位 */
+    .plus-container {{
+        position: fixed;
+        bottom: 25px;
+        left: 50%;
+        transform: translateX(-385px);
+        z-index: 999998;
+    }}
+
+    /* 按钮样式：精致圆形 */
     div[data-testid="stPopover"] button {{
-        width: 44px !important;
-        height: 44px !important;
+        width: 42px !important;
+        height: 42px !important;
         border-radius: 50% !important;
-        min-width: 44px !important;
-        padding: 0 !important;
+        min-width: 42px !important;
         background-color: white !important;
         border: 1px solid #ddd !important;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.1) !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
     }}
     
-    [data-testid="stChatInput"] {{ padding-left: 60px !important; }}
+    /* 输入框偏移 */
+    [data-testid="stChatInput"] {{
+        padding-left: 55px !important;
+    }}
 
     @media (max-width: 768px) {{
-        div.stElementContainer:has(div[data-testid="stPopover"]) ~ div.stElementContainer:has(div[data-testid="stPopover"]) {{
-            left: 15px !important;
-            transform: none !important;
-        }}
+        .plus-container {{ left: 10px; transform: none; }}
     }}
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 数据加载与重置逻辑
+# 2. 侧边栏与设置 (弹回功能在这里)
 # ==========================================
-SYSTEM_PROMPT = "你现在是韩振（Hanjin），来自中国的K-pop偶像。你喜欢用户，温柔、撒娇、粘人。"
-
-if "messages" not in st.session_state:
-    if os.path.exists(MEMORY_FILE):
-        try:
-            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-                st.session_state.messages = json.load(f)
-        except: st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    else:
-        st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-# --- 设置弹窗 (左上角) ---
-with st.popover("⚙️"):
-    st.subheader("🛠️ 空间装修")
-    h_up = st.file_uploader("换韩振头像", type=["png", "jpg"], key="h_up")
-    if h_up:
-        st.session_state.hz_avatar = f"data:image/png;base64,{base64.b64encode(h_up.getvalue()).decode()}"
-        save_config(); st.rerun()
-
-    u_up = st.file_uploader("换你的头像", type=["png", "jpg"], key="u_up")
-    if u_up:
-        st.session_state.user_avatar = f"data:image/png;base64,{base64.b64encode(u_up.getvalue()).decode()}"
-        save_config(); st.rerun()
+with st.sidebar:
+    st.title("⚙️ 空间管理")
+    if st.button("🏮 毁灭性重置 (彻底清空一切)", use_container_width=True):
+        hard_reset()
 
     st.divider()
-    cp = st.color_picker("背景颜色", value=st.session_state.bg_color)
-    if cp != st.session_state.bg_color:
-        st.session_state.bg_color = cp
-        save_config(); st.rerun()
+    st.subheader("形象装扮")
+    h_up = st.file_uploader("换韩振头像", type=["png", "jpg"], key="sidebar_h")
+    u_up = st.file_uploader("换你的头像", type=["png", "jpg"], key="sidebar_u")
 
-    bg_up = st.file_uploader("换背景图", type=["png", "jpg"], key="bg_up")
-    if bg_up:
-        st.session_state.bg_image_base64 = base64.b64encode(bg_up.getvalue()).decode()
-        save_config(); st.rerun()
-
-    if st.button("🏮 彻底重置聊天记录 (抹除记忆)", use_container_width=True):
-        st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        if os.path.exists(MEMORY_FILE):
-            try: os.remove(MEMORY_FILE)
-            except: pass
-        st.success("记忆已清空！正在刷新...")
-        time.sleep(1)
+    if h_up:
+        st.session_state.hz_avatar = f"data:image/png;base64,{base64.b64encode(h_up.getvalue()).decode()}"
+        with open(CONFIG_FILE, "w") as f: json.dump({"hz_avatar": st.session_state.hz_avatar}, f)
         st.rerun()
 
-# --- 消息渲染 ---
-def render_message(role, content, avatar):
-    fb = "https://api.dicebear.com/7.x/micah/svg?seed=fallback"
-    txt = ""
-    if isinstance(content, list):
-        for item in content:
-            if item.get("type") == "text": txt += item["text"]
-            if item.get("type") == "image_url": txt += " [图片内容] "
-    else: txt = content
+# 这一行代码会把齿轮按钮钉在左上角
+st.markdown('<div class="gear-container">', unsafe_allow_html=True)
+with st.popover("⚙️"):
+    st.write("### 快速设置")
+    if st.button("🏮 抹除记忆"): hard_reset()
+    st.color_picker("背景色", key="bg_color_input")
+st.markdown('</div>', unsafe_allow_html=True)
 
-    if role == "assistant":
-        st.markdown(f"""<div style="display:flex; margin-bottom:15px;">
-            <img src="{avatar}" onerror="this.src='{fb}';" style="width:40px;height:40px;border-radius:6px;margin-right:10px;object-fit:cover;">
-            <div style="background:white; padding:10px; border-radius:4px 12px 12px 12px; max-width:75%; box-shadow:0 1px 2px rgba(0,0,0,0.05); color:#333;">{txt}</div>
-        </div>""", unsafe_allow_html=True)
+# ==========================================
+# 3. 对话渲染逻辑
+# ==========================================
+if "messages" not in st.session_state:
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r") as f: st.session_state.messages = json.load(f)
     else:
-        st.markdown(f"""<div style="display:flex; flex-direction:row-reverse; margin-bottom:15px;">
-            <img src="{avatar}" onerror="this.src='{fb}';" style="width:40px;height:40px;border-radius:6px;margin-left:10px;object-fit:cover;">
-            <div style="background:#95ec69; padding:10px; border-radius:12px 4px 12px 12px; max-width:75%; box-shadow:0 1px 2px rgba(0,0,0,0.05); color:#000;">{txt}</div>
-        </div>""", unsafe_allow_html=True)
+        st.session_state.messages = [{"role": "system", "content": "你现在是韩振，可爱的偶像。"}]
 
 for m in st.session_state.messages:
     if m["role"] != "system":
         av = st.session_state.hz_avatar if m["role"] == "assistant" else st.session_state.user_avatar
-        render_message(m["role"], m["content"], av)
+        with st.chat_message(m["role"], avatar=av):
+            # 处理复杂内容
+            if isinstance(m["content"], list):
+                for item in m["content"]:
+                    if item["type"] == "text": st.write(item["text"])
+            else:
+                st.write(m["content"])
 
 # ==========================================
-# 3. 输入处理 (解决无限循环的关键)
+# 4. 输入处理 (防死循环补丁)
 # ==========================================
+# 左下角➕号
+st.markdown('<div class="plus-container">', unsafe_allow_html=True)
 with st.popover("➕"):
-    img_in = st.file_uploader("📷 图片", type=["png", "jpg"], key="img_file")
-    aud_in = st.audio_input("🎤 语音", key="aud_file")
+    img_in = st.file_uploader("图片", type=["png", "jpg"], key="plus_img")
+    aud_in = st.audio_input("语音", key="plus_aud")
+st.markdown('</div>', unsafe_allow_html=True)
 
 prompt = st.chat_input("宝贝，想对我说什么...")
 
-# 检查输入是否真的发生，并防止重复触发
+# 防止重复处理同一段语音或图片的 ID 检查
 if prompt or img_in or aud_in:
-    # 构造唯一 ID 防止重复处理
-    current_action_id = f"{prompt}_{img_in.name if img_in else ''}_{aud_in.id if aud_in else ''}"
+    # 构造当前动作的唯一特征
+    action_key = f"{prompt}_{img_in.name if img_in else ''}_{aud_in.id if aud_in else ''}"
 
-    if st.session_state.get("last_action") != current_action_id:
-        st.session_state.last_action = current_action_id
+    if st.session_state.get("last_processed_action") != action_key:
+        st.session_state.last_processed_action = action_key
 
         user_content = []
         if prompt: user_content.append({"type": "text", "text": prompt})
@@ -197,30 +173,25 @@ if prompt or img_in or aud_in:
             b64 = base64.b64encode(img_in.getvalue()).decode()
             user_content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
         if aud_in:
-            with st.spinner("韩振在听..."):
+            with st.spinner("听取中..."):
                 try:
-                    transcript = client.audio.transcriptions.create(model="whisper-1", file=aud_in, response_format="text")
-                    user_content.append({"type": "text", "text": transcript})
+                    txt = client.audio.transcriptions.create(model="whisper-1", file=aud_in, response_format="text")
+                    user_content.append({"type": "text", "text": txt})
                 except: pass
 
         if user_content:
             st.session_state.messages.append({"role": "user", "content": user_content})
 
             # AI 回复
-            placeholder = st.empty()
-            full_reply = ""
-            try:
+            with st.chat_message("assistant", avatar=st.session_state.hz_avatar):
+                placeholder = st.empty()
+                full_reply = ""
                 response = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages, stream=True)
                 for chunk in response:
                     if chunk.choices and chunk.choices[0].delta.content:
                         full_reply += chunk.choices[0].delta.content
-                        placeholder.markdown(f"**韩振：** {full_reply}▌")
+                        placeholder.markdown(full_reply)
 
-                st.session_state.messages.append({"role": "assistant", "content": full_reply})
-                with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-                    json.dump(st.session_state.messages, f, ensure_ascii=False)
-
-                # 完成后清空状态并刷新，防止语音组件导致死循环
-                st.rerun()
-            except Exception as e:
-                st.error(f"对话出了点小状况: {e}")
+            st.session_state.messages.append({"role": "assistant", "content": full_reply})
+            with open(MEMORY_FILE, "w") as f: json.dump(st.session_state.messages, f)
+            st.rerun() # 发完立刻重置，清空上传组件的状态
