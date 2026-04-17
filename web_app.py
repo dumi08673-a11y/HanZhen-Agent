@@ -3,7 +3,10 @@ import time
 import json
 import os
 import base64
+import requests
+import datetime
 from openai import OpenAI
+from urllib.parse import quote
 
 # ==========================================
 # 0. 基础环境与配置持久化
@@ -33,11 +36,42 @@ def save_config():
 config = load_config()
 
 # ==========================================
-# 1. 页面配置与“微信风”重装修 (CSS)
+# 1. 联网搜索工具 (让韩振变聪明)
+# ==========================================
+def search_web(query):
+    api_key = os.environ.get("TAVILY_API_KEY")
+    if api_key:
+        try:
+            payload = {"api_key": api_key, "query": query, "include_answer": True}
+            data = requests.post("https://api.tavily.com/search", json=payload, timeout=10).json()
+            return f"📌 搜索结果：{data.get('answer', '未找到直接答案')}\n详情：{[r.get('content') for r in data.get('results', [])[:2]]}"
+        except: pass
+    try:
+        url = f"https://api.duckduckgo.com/?q={quote(query)}&format=json"
+        res = requests.get(url, timeout=5).json()
+        return res.get("AbstractText", "没搜到具体结果。")
+    except: return "搜索暂时不可用。"
+
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_web",
+            "description": "当用户询问关于实时新闻、TWS男团动态、天气、日期或韩振不知道的知识时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "搜索关键词"}},
+                "required": ["query"]
+            }
+        }
+    }
+]
+
+# ==========================================
+# 2. 页面配置与 CSS (微信风 + 强力布局)
 # ==========================================
 st.set_page_config(page_title="韩振的私密空间", page_icon="🎤", layout="centered")
 
-# 初始化状态 (优先从本地文件恢复，实现永久保存)
 if "bg_color" not in st.session_state:
     st.session_state.bg_color = config.get("bg_color", "#f4f6f8")
 if "bg_image_base64" not in st.session_state:
@@ -55,51 +89,31 @@ st.markdown(f"""
     <style>
     .stApp {{ {bg_style} }}
     #MainMenu, footer, header {{ display: none !important; }}
+    [data-testid="stMainBlockContainer"] {{ padding-top: 100px !important; padding-bottom: 150px !important; }}
+
+    /* 左上角⚙️ */
+    div.stElementContainer:has(div[data-testid="stPopover"]) {{ position: fixed; top: 30px; left: 30px; z-index: 999999; }}
     
-    /* 聊天区布局 */
-    [data-testid="stMainBlockContainer"] {{
-        padding-top: 100px !important;
-        padding-bottom: 150px !important; 
-    }}
-
-    /* 左上角⚙️：固定定位 */
-    div.stElementContainer:has(div[data-testid="stPopover"]) {{
-        position: fixed; top: 30px; left: 30px; z-index: 999999;
-    }}
-
-    /* 左下角➕：固定定位 */
+    /* 左下角➕ */
     div.stElementContainer:has(div[data-testid="stPopover"]) ~ div.stElementContainer:has(div[data-testid="stPopover"]) {{
-        position: fixed !important; bottom: 30px !important; 
-        left: 50% !important; transform: translateX(-380px) !important;
-        z-index: 999998 !important;
+        position: fixed !important; bottom: 30px !important; left: 50% !important; transform: translateX(-380px) !important; z-index: 999998 !important;
     }}
     
-    /* 圆形按钮样式 */
     div[data-testid="stPopover"] button {{
         width: 44px !important; height: 44px !important; border-radius: 50% !important;
-        min-width: 44px !important; padding: 0 !important; background-color: white !important;
-        border: 1px solid #ddd !important; box-shadow: 0 4px 10px rgba(0,0,0,0.1) !important;
+        background: white !important; border: 1px solid #ddd !important; box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
     }}
-    
     [data-testid="stChatInput"] {{ padding-left: 60px !important; }}
-
-    /* 手机适配 */
-    @media (max-width: 768px) {{
-        div.stElementContainer:has(div[data-testid="stPopover"]) ~ div.stElementContainer:has(div[data-testid="stPopover"]) {{
-            left: 15px !important; transform: none !important;
-        }}
-    }}
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 侧边栏与设置
+# 3. 顶层按钮逻辑 (⚙️面板)
 # ==========================================
-SYSTEM_PROMPT = "你现在是韩振（Hanjin），来自中国的K-pop偶像。你喜欢用户，温柔、撒娇、粘人。"
+SYSTEM_PROMPT = "你现在是韩振（Hanjin），来自中国的K-pop偶像。你喜欢用户，撒娇、粘人。你可以联网搜索。"
 
 with st.popover("⚙️"):
     st.subheader("🛠️ 空间装修")
-    # 头像上传
     h_up = st.file_uploader("换韩振头像", type=["png", "jpg"], key="h_up")
     if h_up:
         st.session_state.hz_avatar = f"data:image/png;base64,{base64.b64encode(h_up.getvalue()).decode()}"
@@ -110,25 +124,18 @@ with st.popover("⚙️"):
         st.session_state.user_avatar = f"data:image/png;base64,{base64.b64encode(u_up.getvalue()).decode()}"
         save_config(); st.rerun()
 
-    st.divider()
-    # 背景定制
-    cp = st.color_picker("背景颜色", value=st.session_state.bg_color)
+    cp = st.color_picker("背景色", value=st.session_state.bg_color)
     if cp != st.session_state.bg_color:
         st.session_state.bg_color = cp
         save_config(); st.rerun()
 
-    bg_up = st.file_uploader("背景图", type=["png", "jpg"], key="bg_up")
-    if bg_up:
-        st.session_state.bg_image_base64 = base64.b64encode(bg_up.getvalue()).decode()
-        save_config(); st.rerun()
-
-    if st.button("🏮 重置所有聊天 (清空记忆)", use_container_width=True):
+    if st.button("🏮 重置所有聊天", use_container_width=True):
         st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         if os.path.exists(MEMORY_FILE): os.remove(MEMORY_FILE)
         st.rerun()
 
 # ==========================================
-# 3. 消息渲染 (恢复微信气泡风格)
+# 4. 聊天消息渲染 (微信气泡)
 # ==========================================
 if "messages" not in st.session_state:
     if os.path.exists(MEMORY_FILE):
@@ -141,70 +148,81 @@ if "messages" not in st.session_state:
 
 def render_bubble(role, content, avatar):
     fb = "https://api.dicebear.com/7.x/micah/svg?seed=fallback"
-    txt = ""
-    if isinstance(content, list):
-        for item in content:
-            if item.get("type") == "text": txt += item["text"]
-            if item.get("type") == "image_url": txt += " [图片内容] "
-    else: txt = content
+    txt = content if isinstance(content, str) else " ".join([i.get("text", "") for i in content if i.get("type")=="text"])
+    if not txt: return
 
     if role == "assistant":
         st.markdown(f"""<div style="display:flex; margin-bottom:15px;">
-            <img src="{avatar}" onerror="this.src='{fb}';" style="width:42px;height:42px;border-radius:6px;margin-right:12px;object-fit:cover;box-shadow:0 1px 2px rgba(0,0,0,0.1);">
-            <div style="background:white; padding:10px 14px; border-radius:4px 14px 14px 14px; max-width:75%; box-shadow:0 1px 3px rgba(0,0,0,0.05); color:#333; font-size:15px; line-height:1.5;">{txt}</div>
+            <img src="{avatar}" onerror="this.src='{fb}';" style="width:42px;height:42px;border-radius:6px;margin-right:12px;object-fit:cover;">
+            <div style="background:white; padding:10px 14px; border-radius:4px 14px 14px 14px; max-width:75%; box-shadow:0 1px 3px rgba(0,0,0,0.05); color:#333; font-size:15px;">{txt}</div>
         </div>""", unsafe_allow_html=True)
     else:
         st.markdown(f"""<div style="display:flex; flex-direction:row-reverse; margin-bottom:15px;">
-            <img src="{avatar}" onerror="this.src='{fb}';" style="width:42px;height:42px;border-radius:6px;margin-left:12px;object-fit:cover;box-shadow:0 1px 2px rgba(0,0,0,0.1);">
-            <div style="background:#95ec69; padding:10px 14px; border-radius:14px 4px 14px 14px; max-width:75%; box-shadow:0 1px 3px rgba(0,0,0,0.05); color:#000; font-size:15px; line-height:1.5;">{txt}</div>
+            <img src="{avatar}" onerror="this.src='{fb}';" style="width:42px;height:42px;border-radius:6px;margin-left:12px;object-fit:cover;">
+            <div style="background:#95ec69; padding:10px 14px; border-radius:14px 4px 14px 14px; max-width:75%; box-shadow:0 1px 3px rgba(0,0,0,0.05); color:#000; font-size:15px;">{txt}</div>
         </div>""", unsafe_allow_html=True)
 
+# 渲染历史记录
 for m in st.session_state.messages:
-    if m["role"] != "system":
+    if m["role"] in ["user", "assistant"]:
         av = st.session_state.hz_avatar if m["role"] == "assistant" else st.session_state.user_avatar
         render_bubble(m["role"], m["content"], av)
 
 # ==========================================
-# 4. 底部输入逻辑 (➕与聊天框)
+# 5. 输入逻辑 (解决延迟的关键：先渲染再请求)
 # ==========================================
 with st.popover("➕"):
-    img_in = st.file_uploader("📷 图片", type=["png", "jpg"], key="img_pop")
-    aud_in = st.audio_input("🎤 语音", key="aud_pop")
+    img_in = st.file_uploader("图片", type=["png", "jpg"], key="img_pop")
+    aud_in = st.audio_input("语音", key="aud_pop")
 
 prompt = st.chat_input("宝贝，想对我说什么...")
 
 if prompt or img_in or aud_in:
-    # 唯一性校验，彻底杀死死循环
-    action_token = f"{prompt}_{img_in.name if img_in else ''}_{aud_in.id if aud_in else ''}"
-    if st.session_state.get("last_processed") != action_token:
-        st.session_state.last_processed = action_token
+    # 构造唯一 ID 校验
+    action_key = f"{prompt}_{img_in.name if img_in else ''}_{aud_in.id if aud_in else ''}"
+    if st.session_state.get("last_action") != action_key:
+        st.session_state.last_action = action_key
 
-        user_content = []
-        if prompt: user_content.append({"type": "text", "text": prompt})
+        user_msg = []
+        if prompt: user_msg.append({"type": "text", "text": prompt})
         if img_in:
             b64 = base64.b64encode(img_in.getvalue()).decode()
-            user_content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
+            user_msg.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
         if aud_in:
-            with st.spinner("韩振正在听..."):
-                try:
-                    res_txt = client.audio.transcriptions.create(model="whisper-1", file=aud_in, response_format="text")
-                    user_content.append({"type": "text", "text": res_txt})
-                except: pass
+            try:
+                res = client.audio.transcriptions.create(model="whisper-1", file=aud_in, response_format="text")
+                user_msg.append({"type": "text", "text": res})
+            except: pass
 
-        if user_content:
-            st.session_state.messages.append({"role": "user", "content": user_content})
+        if user_msg:
+            # --- 步骤1: 先把用户消息存入并【立刻在当前页面渲染一次】 ---
+            st.session_state.messages.append({"role": "user", "content": user_msg})
+            render_bubble("user", user_msg, st.session_state.user_avatar)
 
-            # AI 回复流
-            placeholder = st.empty()
-            full_reply = ""
-            response = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages, stream=True)
-            for chunk in response:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    full_reply += chunk.choices[0].delta.content
-                    # 临时占位，保证回复流畅
-                    placeholder.markdown(f"**韩振：** {full_reply}▌")
+            # --- 步骤2: 让 AI 思考 (联网搜索) ---
+            with st.spinner("韩振正在想怎么回你..."):
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=st.session_state.messages,
+                    tools=tools, tool_choice="auto"
+                )
+                res_msg = response.choices[0].message
 
-            st.session_state.messages.append({"role": "assistant", "content": full_reply})
+                if res_msg.tool_calls:
+                    st.session_state.messages.append(res_msg)
+                    for call in res_msg.tool_calls:
+                        if call.function.name == "search_web":
+                            args = json.loads(call.function.arguments)
+                            res = search_web(args.get("query"))
+                            st.session_state.messages.append({"tool_call_id": call.id, "role": "tool", "name": "search_web", "content": res})
+
+                    final = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
+                    final_reply = final.choices[0].message.content
+                else:
+                    final_reply = res_msg.content
+
+            # --- 步骤3: 保存并强制刷新页面显示完整对话 ---
+            st.session_state.messages.append({"role": "assistant", "content": final_reply})
             with open(MEMORY_FILE, "w", encoding="utf-8") as f:
                 json.dump(st.session_state.messages, f, ensure_ascii=False)
             st.rerun()
