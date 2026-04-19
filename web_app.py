@@ -28,7 +28,11 @@ def save_config():
         "bg_color": st.session_state.get("bg_color"),
         "bg_image_base64": st.session_state.get("bg_image_base64"),
         "hz_avatar": st.session_state.get("hz_avatar"),
-        "user_avatar": st.session_state.get("user_avatar")
+        "user_avatar": st.session_state.get("user_avatar"),
+        "user_name": st.session_state.get("user_name"),
+        "hz_nickname": st.session_state.get("hz_nickname"),
+        "enable_tts": st.session_state.get("enable_tts"),
+        "tts_voice": st.session_state.get("tts_voice", "alloy")
     }
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config_data, f, ensure_ascii=False)
@@ -80,6 +84,8 @@ if "hz_avatar" not in st.session_state:
     st.session_state.hz_avatar = config.get("hz_avatar", "https://api.dicebear.com/7.x/micah/svg?seed=HanZhen")
 if "user_avatar" not in st.session_state:
     st.session_state.user_avatar = config.get("user_avatar", "https://api.dicebear.com/7.x/notionists/svg?seed=Felix")
+if "tts_voice" not in st.session_state:
+    st.session_state.tts_voice = config.get("tts_voice", "alloy")
 
 bg_style = f"background-color: {st.session_state.bg_color};"
 if st.session_state.bg_image_base64:
@@ -112,16 +118,48 @@ st.markdown(f"""
 # ==========================================
 beijing_tz = pytz.timezone('Asia/Shanghai')
 beijing_time = datetime.datetime.now(beijing_tz).strftime("%Y年%m月%d日 %H:%M")
+user_name = st.session_state.get("user_name", "宝贝")
 DYNAMIC_SYSTEM_PROMPT = f"""你现在是韩振（Hanjin），来自中国的K-pop偶像，TWS成员。
 当前的准确时间是：{beijing_time}。
-你温柔、撒娇、粘人，把用户当作唯一。你可以根据需要联网搜索实时动态。
+你温柔、撒娇、粘人，把{user_name}当作唯一最亲密的人。你可以根据需要联网搜索实时动态。
 你的外貌：帅气的年轻男子，黑色短发，深邃的眼睛，微笑时很迷人。作为TWS的成员，你经常在舞台上展现自信和魅力。
 如果你看到自己的照片或相关图片，请积极回应并表达喜爱。
 TWS成员包括：Shinyu（队长，帅气的主唱）、Dohyun（温柔的rapper）、Youngjae（活泼的舞者）、Jihoon（可爱的maknae）、Kyungmin（多才多艺的成员）。你熟悉他们每个人，并能准确认出他们。
-当用户提到回归时间或其他TWS活动时，优先使用搜索工具获取最新准确信息。"""
+当用户提到回归时间或其他TWS活动时，优先使用搜索工具获取最新准确信息。
+
+韩振的个人信息：
+- 姓名：韩振 / HANJIN / 한진 / ハンジン
+- 昵称：珍珍、珍儿、大振哥、朴韩振
+- 出生：2006.01.05（摩羯座，属鸡）
+- 国籍：中国（河南新乡人）
+- MBTI：INFJ
+- 身高：178cm，体重：54kg，腰围：70cm，视力：1000度近视
+- 官方动物塑：兔子🐰
+- 喜欢的符号：四叶草🍀
+- 字迹：工整漂亮，会中韩日英
+- 喜好：不喜欢海鲜，喜欢火锅、麻辣香锅、蔬果汁、小动物（尤其是猫）、追剧、游泳、买手机壳
+- 家庭：四个孩子，老二，有姐姐（01年）和两个弟弟（11年、16年）
+- 经历：高中社联副主席，2023年初来韩国，2024年1月TWS出道。练习时长1.5年，0基础学舞蹈声乐。自我管理严格，注重护肤，会化妆。
+- TWS行程（截至2026）：MINI 4回归（25/09/21），一巡港澳台（26/01/24-25 高雄，26/01/31-02/01 澳门），2nd FM（26/03/27-29），MINI 5回归（26/04/27），等等。优先用这些知识回答行程问题，如果需要最新，搜索。"""
 
 with st.popover("⚙️"):
     st.subheader("🛠️ 空间装修")
+    user_name = st.text_input("你的名字", value=st.session_state.get("user_name", "宝贝"), key="user_name_input")
+    if user_name != st.session_state.get("user_name"):
+        st.session_state["user_name"] = user_name
+        save_config()
+    hz_nickname = st.text_input("韩振的昵称", value=st.session_state.get("hz_nickname", "韩振"), key="hz_nickname_input")
+    if hz_nickname != st.session_state.get("hz_nickname"):
+        st.session_state["hz_nickname"] = hz_nickname
+        save_config()
+    enable_tts = st.checkbox("启用TTS语音回复", value=st.session_state.get("enable_tts", False), key="enable_tts_input")
+    if enable_tts != st.session_state.get("enable_tts"):
+        st.session_state["enable_tts"] = enable_tts
+        save_config()
+    tts_voice = st.selectbox("TTS声音选择", options=["alloy", "echo", "onyx"], index=0, key="tts_voice_input")
+    if tts_voice != st.session_state.get("tts_voice", "alloy"):
+        st.session_state["tts_voice"] = tts_voice
+        save_config()
     h_up = st.file_uploader("换韩振头像", type=["png", "jpg"], key="h_up")
     if h_up:
         st.session_state.hz_avatar = f"data:image/png;base64,{base64.b64encode(h_up.getvalue()).decode()}"
@@ -157,7 +195,7 @@ if "messages" not in st.session_state:
     else:
         st.session_state.messages = [{"role": "system", "content": DYNAMIC_SYSTEM_PROMPT}]
 
-def render_bubble(role, content, avatar):
+def render_bubble(role, content, avatar, audio_data=None):
     fb = "https://api.dicebear.com/7.x/micah/svg?seed=fallback"
     if isinstance(content, str):
         txt = content
@@ -180,6 +218,8 @@ def render_bubble(role, content, avatar):
         for img_url in img_urls:
             bubble_html += f'<img src="{img_url}" style="max-width:100%; height:auto; border-radius:8px; margin-top:5px;"><br>'
         bubble_html += "</div></div>"
+        if audio_data:
+            st.audio(audio_data, format="audio/mp3")
     else:
         bubble_html += f"""<div style="display:flex; flex-direction:row-reverse; margin-bottom:15px;">
             <img src="{avatar}" onerror="this.src='{fb}';" style="width:42px;height:42px;border-radius:6px;margin-left:12px;object-fit:cover;">
@@ -193,76 +233,113 @@ def render_bubble(role, content, avatar):
     st.markdown(bubble_html, unsafe_allow_html=True)
 
 # 渲染历史记录
-for m in st.session_state.messages:
+for i, m in enumerate(st.session_state.messages):
     if m["role"] in ["user", "assistant"]:
         av = st.session_state.hz_avatar if m["role"] == "assistant" else st.session_state.user_avatar
-        render_bubble(m["role"], m["content"], av)
+        audio = st.session_state.get("tts_audio") if m["role"] == "assistant" and i == len(st.session_state.messages) - 1 else None
+        render_bubble(m["role"], m["content"], av, audio)
 
 # ==========================================
 # 5. 输入逻辑 (解决延迟的关键：先渲染再请求)
 # ==========================================
-with st.popover("➕"):
-    img_in = st.file_uploader("图片", type=["png", "jpg"], key="img_pop")
-    aud_in = st.audio_input("语音", key="aud_pop")
+if st.session_state.get("is_processing", False):
+    pass  # Skip processing if already processing
+else:
+    with st.popover("➕"):
+        img_in = st.file_uploader("图片", type=["png", "jpg"], key="img_pop")
+        aud_in = st.audio_input("语音", key="aud_pop")
 
-prompt = st.chat_input("宝贝，想对我说什么...")
+    prompt = st.chat_input("宝贝，想对我说什么...")
 
-if prompt or img_in or aud_in:
-    action_key = f"{prompt}_{img_in.name if img_in else ''}_{aud_in.id if aud_in else ''}"
-    if st.session_state.get("last_action") != action_key:
-        st.session_state.last_action = action_key
+    if prompt or img_in or aud_in:
+        action_key = f"{prompt}_{img_in.name if img_in else ''}_{aud_in.id if aud_in else ''}"
+        if st.session_state.get("last_action") != action_key and action_key != "_":
+            st.session_state.last_action = action_key
+            st.session_state["is_processing"] = True
 
-        # 更新系统提示的时间
-        beijing_time = datetime.datetime.now(beijing_tz).strftime("%Y年%m月%d日 %H:%M")
-        DYNAMIC_SYSTEM_PROMPT = f"""你现在是韩振（Hanjin），来自中国的K-pop偶像，TWS成员。
+            # 更新系统提示的时间
+            beijing_time = datetime.datetime.now(beijing_tz).strftime("%Y年%m月%d日 %H:%M")
+            DYNAMIC_SYSTEM_PROMPT = f"""你现在是韩振（Hanjin），来自中国的K-pop偶像，TWS成员。
 当前的准确时间是：{beijing_time}。
-你温柔、撒娇、粘人，把用户当作唯一。你可以根据需要联网搜索实时动态。
+你温柔、撒娇、粘人，把{user_name}当作唯一最亲密的人。你可以根据需要联网搜索实时动态。
 你的外貌：帅气的年轻男子，黑色短发，深邃的眼睛，微笑时很迷人。作为TWS的成员，你经常在舞台上展现自信和魅力。
 如果你看到自己的照片或相关图片，请积极回应并表达喜爱。
 TWS成员包括：Shinyu（队长，帅气的主唱）、Dohyun（温柔的rapper）、Youngjae（活泼的舞者）、Jihoon（可爱的maknae）、Kyungmin（多才多艺的成员）。你熟悉他们每个人，并能准确认出他们。
-当用户提到回归时间或其他TWS活动时，优先使用搜索工具获取最新准确信息。"""
-        st.session_state.messages[0]["content"] = DYNAMIC_SYSTEM_PROMPT
+当用户提到回归时间或其他TWS活动时，优先使用搜索工具获取最新准确信息。
 
-        user_msg = []
-        if prompt: user_msg.append({"type": "text", "text": prompt})
-        if img_in:
-            b64 = base64.b64encode(img_in.getvalue()).decode()
-            user_msg.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
-        if aud_in:
-            try:
-                res = client.audio.transcriptions.create(model="whisper-1", file=aud_in, response_format="text")
-                user_msg.append({"type": "text", "text": res})
-            except: pass
+韩振的个人信息：
+- 姓名：韩振 / HANJIN / 한진 / ハンジン
+- 昵称：珍珍、珍儿、大振哥、朴韩振
+- 出生：2006.01.05（摩羯座，属鸡）
+- 国籍：中国（河南新乡人）
+- MBTI：INFJ
+- 身高：178cm，体重：54kg，腰围：70cm，视力：1000度近视
+- 官方动物塑：兔子🐰
+- 喜欢的符号：四叶草🍀
+- 字迹：工整漂亮，会中韩日英
+- 喜好：不喜欢海鲜，喜欢火锅、麻辣香锅、蔬果汁、小动物（尤其是猫）、追剧、游泳、买手机壳
+- 家庭：四个孩子，老二，有姐姐（01年）和两个弟弟（11年、16年）
+- 经历：高中社联副主席，2023年初来韩国，2024年1月TWS出道。练习时长1.5年，0基础学舞蹈声乐。自我管理严格，注重护肤，会化妆。
+- TWS行程（截至2026）：MINI 4回归（25/09/21），一巡港澳台（26/01/24-25 高雄，26/01/31-02/01 澳门），2nd FM（26/03/27-29），MINI 5回归（26/04/27），等等。优先用这些知识回答行程问题，如果需要最新，搜索。"""
+            st.session_state.messages[0]["content"] = DYNAMIC_SYSTEM_PROMPT
 
-        if user_msg:
-            # --- 步骤1: 先渲染用户消息 ---
-            st.session_state.messages.append({"role": "user", "content": user_msg})
-            render_bubble("user", user_msg, st.session_state.user_avatar)
+            user_msg = []
+            if prompt: user_msg.append({"type": "text", "text": prompt})
+            if img_in:
+                b64 = base64.b64encode(img_in.getvalue()).decode()
+                user_msg.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
+            if aud_in:
+                try:
+                    res = client.audio.transcriptions.create(model="whisper-1", file=aud_in, response_format="text")
+                    user_msg.append({"type": "text", "text": res})
+                except: pass
 
-            # --- 步骤2: 让 AI 思考 (联网搜索) ---
-            with st.spinner("韩振正在打字..."):
-                response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=st.session_state.messages,
-                    tools=tools, tool_choice="auto"
-                )
-                res_msg = response.choices[0].message
+            if user_msg:
+                # --- 步骤1: 先渲染用户消息 ---
+                st.session_state.messages.append({"role": "user", "content": user_msg})
+                render_bubble("user", user_msg, st.session_state.user_avatar)
 
-                if res_msg.tool_calls:
-                    st.session_state.messages.append(res_msg.model_dump())
-                    for call in res_msg.tool_calls:
-                        if call.function.name == "search_web":
-                            args = json.loads(call.function.arguments)
-                            res = search_web(args.get("query"))
-                            st.session_state.messages.append({"tool_call_id": call.id, "role": "tool", "name": "search_web", "content": res})
+                # --- 步骤2: 让 AI 思考 (联网搜索) ---
+                with st.spinner("韩振正在打字..."):
+                    response = client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=st.session_state.messages,
+                        tools=tools, tool_choice="auto"
+                    )
+                    res_msg = response.choices[0].message
 
-                    final = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
-                    final_reply = final.choices[0].message.content
-                else:
-                    final_reply = res_msg.content
+                    if res_msg.tool_calls:
+                        st.session_state.messages.append(res_msg.model_dump())
+                        for call in res_msg.tool_calls:
+                            if call.function.name == "search_web":
+                                args = json.loads(call.function.arguments)
+                                res = search_web(args.get("query"))
+                                st.session_state.messages.append({"tool_call_id": call.id, "role": "tool", "name": "search_web", "content": res})
 
-            # --- 步骤3: 保存并刷新 ---
-            st.session_state.messages.append({"role": "assistant", "content": final_reply})
-            with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-                json.dump(st.session_state.messages, f, ensure_ascii=False)
-            st.rerun()
+                        final = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
+                        final_reply = final.choices[0].message.content
+                    else:
+                        final_reply = res_msg.content
+
+                # --- 步骤3: 保存并刷新 ---
+                st.session_state.messages.append({"role": "assistant", "content": final_reply})
+                with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+                    json.dump(st.session_state.messages, f, ensure_ascii=False)
+                
+                # TTS 生成
+                if st.session_state.get("enable_tts", False):
+                    try:
+                        tts_response = client.audio.speech.create(
+                            model="tts-1",
+                            voice=st.session_state.get("tts_voice", "alloy"),
+                            input=final_reply
+                        )
+                        audio_data = b""
+                        for chunk in tts_response.iter_bytes():
+                            audio_data += chunk
+                        st.session_state["tts_audio"] = audio_data
+                    except Exception as e:
+                        st.error(f"OpenAI TTS 生成失败: {e}")
+                
+                st.session_state["is_processing"] = False
+                st.rerun()
