@@ -196,6 +196,10 @@ if "messages" not in st.session_state:
         st.session_state.messages = [{"role": "system", "content": DYNAMIC_SYSTEM_PROMPT}]
 
 def render_bubble(role, content, avatar, audio_data=None):
+    # 核心修复：如果是工具调用产生的空内容消息，直接跳过渲染
+    if content is None:
+        return
+
     fb = "https://api.dicebear.com/7.x/micah/svg?seed=fallback"
     if isinstance(content, str):
         txt = content
@@ -325,7 +329,7 @@ TWS成员包括：Shinyu（队长，帅气的主唱）、Dohyun（温柔的rappe
                 st.session_state.messages.append({"role": "assistant", "content": final_reply})
                 with open(MEMORY_FILE, "w", encoding="utf-8") as f:
                     json.dump(st.session_state.messages, f, ensure_ascii=False)
-                
+
                 # TTS 生成
                 if st.session_state.get("enable_tts", False):
                     try:
@@ -340,6 +344,6 @@ TWS成员包括：Shinyu（队长，帅气的主唱）、Dohyun（温柔的rappe
                         st.session_state["tts_audio"] = audio_data
                     except Exception as e:
                         st.error(f"OpenAI TTS 生成失败: {e}")
-                
+
                 st.session_state["is_processing"] = False
                 st.rerun()
