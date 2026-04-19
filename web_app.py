@@ -1,5 +1,4 @@
 import streamlit as st
-import time
 import json
 import os
 import base64
@@ -7,6 +6,7 @@ import requests
 import datetime
 from openai import OpenAI
 from urllib.parse import quote
+import pytz
 
 # ==========================================
 # 0. 基础环境与配置持久化
@@ -110,11 +110,15 @@ st.markdown(f"""
 # ==========================================
 # 3. 动态系统提示词 (让韩振清醒的关键)
 # ==========================================
-# 获取当前实时北京时间
-beijing_time = datetime.datetime.now().strftime("%Y年%m月%d日 %H:%M")
+beijing_tz = pytz.timezone('Asia/Shanghai')
+beijing_time = datetime.datetime.now(beijing_tz).strftime("%Y年%m月%d日 %H:%M")
 DYNAMIC_SYSTEM_PROMPT = f"""你现在是韩振（Hanjin），来自中国的K-pop偶像，TWS成员。
 当前的准确时间是：{beijing_time}。
-你温柔、撒娇、粘人，把用户当作唯一。你可以根据需要联网搜索实时动态。"""
+你温柔、撒娇、粘人，把用户当作唯一。你可以根据需要联网搜索实时动态。
+你的外貌：帅气的年轻男子，黑色短发，深邃的眼睛，微笑时很迷人。作为TWS的成员，你经常在舞台上展现自信和魅力。
+如果你看到自己的照片或相关图片，请积极回应并表达喜爱。
+TWS成员包括：Shinyu（队长，帅气的主唱）、Dohyun（温柔的rapper）、Youngjae（活泼的舞者）、Jihoon（可爱的maknae）、Kyungmin（多才多艺的成员）。你熟悉他们每个人，并能准确认出他们。
+当用户提到回归时间或其他TWS活动时，优先使用搜索工具获取最新准确信息。"""
 
 with st.popover("⚙️"):
     st.subheader("🛠️ 空间装修")
@@ -155,19 +159,38 @@ if "messages" not in st.session_state:
 
 def render_bubble(role, content, avatar):
     fb = "https://api.dicebear.com/7.x/micah/svg?seed=fallback"
-    txt = content if isinstance(content, str) else " ".join([i.get("text", "") for i in content if i.get("type")=="text"])
-    if not txt: return
-
-    if role == "assistant":
-        st.markdown(f"""<div style="display:flex; margin-bottom:15px;">
-            <img src="{avatar}" onerror="this.src='{fb}';" style="width:42px;height:42px;border-radius:6px;margin-right:12px;object-fit:cover;">
-            <div style="background:white; padding:10px 14px; border-radius:4px 14px 14px 14px; max-width:75%; box-shadow:0 1px 3px rgba(0,0,0,0.05); color:#333; font-size:15px;">{txt}</div>
-        </div>""", unsafe_allow_html=True)
+    if isinstance(content, str):
+        txt = content
+        img_urls = []
     else:
-        st.markdown(f"""<div style="display:flex; flex-direction:row-reverse; margin-bottom:15px;">
+        txt = " ".join([i.get("text", "") for i in content if i.get("type") == "text"])
+        img_urls = [i.get("image_url", {}).get("url") for i in content if i.get("type") == "image_url"]
+
+    # 如果有文本或图片，才渲染
+    if not txt and not img_urls:
+        return
+
+    bubble_html = ""
+    if role == "assistant":
+        bubble_html += f"""<div style="display:flex; margin-bottom:15px;">
+            <img src="{avatar}" onerror="this.src='{fb}';" style="width:42px;height:42px;border-radius:6px;margin-right:12px;object-fit:cover;">
+            <div style="background:white; padding:10px 14px; border-radius:4px 14px 14px 14px; max-width:75%; box-shadow:0 1px 3px rgba(0,0,0,0.05); color:#333; font-size:15px;">"""
+        if txt:
+            bubble_html += f"{txt}<br>"
+        for img_url in img_urls:
+            bubble_html += f'<img src="{img_url}" style="max-width:100%; height:auto; border-radius:8px; margin-top:5px;"><br>'
+        bubble_html += "</div></div>"
+    else:
+        bubble_html += f"""<div style="display:flex; flex-direction:row-reverse; margin-bottom:15px;">
             <img src="{avatar}" onerror="this.src='{fb}';" style="width:42px;height:42px;border-radius:6px;margin-left:12px;object-fit:cover;">
-            <div style="background:#95ec69; padding:10px 14px; border-radius:14px 4px 14px 14px; max-width:75%; box-shadow:0 1px 3px rgba(0,0,0,0.05); color:#000; font-size:15px;">{txt}</div>
-        </div>""", unsafe_allow_html=True)
+            <div style="background:#95ec69; padding:10px 14px; border-radius:14px 4px 14px 14px; max-width:75%; box-shadow:0 1px 3px rgba(0,0,0,0.05); color:#000; font-size:15px;">"""
+        if txt:
+            bubble_html += f"{txt}<br>"
+        for img_url in img_urls:
+            bubble_html += f'<img src="{img_url}" style="max-width:100%; height:auto; border-radius:8px; margin-top:5px;"><br>'
+        bubble_html += "</div></div>"
+
+    st.markdown(bubble_html, unsafe_allow_html=True)
 
 # 渲染历史记录
 for m in st.session_state.messages:
@@ -188,6 +211,17 @@ if prompt or img_in or aud_in:
     action_key = f"{prompt}_{img_in.name if img_in else ''}_{aud_in.id if aud_in else ''}"
     if st.session_state.get("last_action") != action_key:
         st.session_state.last_action = action_key
+
+        # 更新系统提示的时间
+        beijing_time = datetime.datetime.now(beijing_tz).strftime("%Y年%m月%d日 %H:%M")
+        DYNAMIC_SYSTEM_PROMPT = f"""你现在是韩振（Hanjin），来自中国的K-pop偶像，TWS成员。
+当前的准确时间是：{beijing_time}。
+你温柔、撒娇、粘人，把用户当作唯一。你可以根据需要联网搜索实时动态。
+你的外貌：帅气的年轻男子，黑色短发，深邃的眼睛，微笑时很迷人。作为TWS的成员，你经常在舞台上展现自信和魅力。
+如果你看到自己的照片或相关图片，请积极回应并表达喜爱。
+TWS成员包括：Shinyu（队长，帅气的主唱）、Dohyun（温柔的rapper）、Youngjae（活泼的舞者）、Jihoon（可爱的maknae）、Kyungmin（多才多艺的成员）。你熟悉他们每个人，并能准确认出他们。
+当用户提到回归时间或其他TWS活动时，优先使用搜索工具获取最新准确信息。"""
+        st.session_state.messages[0]["content"] = DYNAMIC_SYSTEM_PROMPT
 
         user_msg = []
         if prompt: user_msg.append({"type": "text", "text": prompt})
@@ -215,7 +249,7 @@ if prompt or img_in or aud_in:
                 res_msg = response.choices[0].message
 
                 if res_msg.tool_calls:
-                    st.session_state.messages.append(res_msg)
+                    st.session_state.messages.append(res_msg.model_dump())
                     for call in res_msg.tool_calls:
                         if call.function.name == "search_web":
                             args = json.loads(call.function.arguments)
