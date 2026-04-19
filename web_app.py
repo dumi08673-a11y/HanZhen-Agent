@@ -164,7 +164,7 @@ def render_bubble(role, content, avatar):
         img_urls = []
     else:
         txt = " ".join([i.get("text", "") for i in content if i.get("type") == "text"])
-        img_urls = [i.get("image_url", {}).get("url") for i in content if i.get("type") == "image_url"]
+        img_urls = [i.get("image_url", {}).get("url") for i in content if i.get("type") == "image_url" and i.get("image_url", {}).get("url")]
 
     # 如果有文本或图片，才渲染
     if not txt and not img_urls:
