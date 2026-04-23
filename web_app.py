@@ -4,6 +4,7 @@ import os
 import base64
 import requests
 import datetime
+import time
 from openai import OpenAI
 from urllib.parse import quote
 import pytz
@@ -14,7 +15,7 @@ import pytz
 client = OpenAI()
 MEMORY_FILE = "hanzhen_memory.json"
 CONFIG_FILE = "hanzhen_config.json"
-LAST_ACTIVE_FILE = "hanzhen_last_active.json" # 新增：记录最后活跃时间
+LAST_ACTIVE_FILE = "hanzhen_last_active.json"
 
 beijing_tz = pytz.timezone('Asia/Shanghai')
 
@@ -121,7 +122,7 @@ st.markdown(f"""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. 动态系统提示词生成器 (保证全避坑规则统一)
+# 3. 动态系统提示词生成器
 # ==========================================
 def get_dynamic_prompt(user_name):
     beijing_time = datetime.datetime.now(beijing_tz).strftime("%Y年%m月%d日 %H:%M")
@@ -213,10 +214,24 @@ with st.popover("⚙️"):
     if cp != st.session_state.bg_color:
         st.session_state.bg_color = cp; save_config(); st.rerun()
 
+    st.divider()
+    st.write("💾 **防止云端重启丢失（备份）**")
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            st.download_button("📥 下载聊天记忆", data=f.read(), file_name="hanzhen_backup.json", mime="application/json", use_container_width=True)
+
+    uploaded_backup = st.file_uploader("📤 恢复聊天记忆", type=["json"])
+    if uploaded_backup:
+        with open(MEMORY_FILE, "wb") as f:
+            f.write(uploaded_backup.getvalue())
+        st.success("恢复成功！正在刷新页面...")
+        time.sleep(1)
+        st.rerun()
+
     if st.button("🏮 重置所有聊天", use_container_width=True):
         st.session_state.messages = [{"role": "system", "content": get_dynamic_prompt(user_name)}]
         if os.path.exists(MEMORY_FILE): os.remove(MEMORY_FILE)
-        update_last_active_time() # 重置时也更新活跃时间
+        update_last_active_time()
         st.rerun()
 
 # ==========================================
@@ -239,7 +254,6 @@ def check_and_trigger_proactive_message():
     now = datetime.datetime.now(beijing_tz)
     diff_hours = (now - last_time).total_seconds() / 3600
 
-    # 如果超过 4 小时没聊，且上一句话是韩振说的
     if diff_hours >= 4 and len(st.session_state.messages) > 1 and st.session_state.messages[-1]["role"] == "assistant":
         with st.spinner("韩振给你留了言..."):
             proactive_prompt = [
@@ -249,7 +263,7 @@ def check_and_trigger_proactive_message():
             try:
                 res = client.chat.completions.create(model="gpt-4o", messages=proactive_prompt)
                 msg = res.choices[0].message.content
-                st.session_state.messages.append({"role": "assistant", "content": msg})
+                st.session_state.messages.append({"role": "assistant", "content": msg, "timestamp": time.time()})
                 with open(MEMORY_FILE, "w", encoding="utf-8") as f:
                     json.dump(st.session_state.messages, f, ensure_ascii=False)
                 update_last_active_time()
@@ -258,12 +272,12 @@ def check_and_trigger_proactive_message():
     return False
 
 # 每次刷新页面时检测
-if not st.session_state.get("is_processing", False):
+if not st.session_state.get("needs_response", False):
     if check_and_trigger_proactive_message():
         st.rerun()
 
 # ==========================================
-# 5. 消息渲染 (微信气泡)
+# 5. 消息渲染 (加入微信时间线)
 # ==========================================
 def render_bubble(role, content, avatar, audio_data=None):
     if content is None: return
@@ -280,7 +294,7 @@ def render_bubble(role, content, avatar, audio_data=None):
     if role == "assistant":
         bubble_html += f"""<div style="display:flex; margin-bottom:15px;">
             <img src="{avatar}" onerror="this.src='{fb}';" style="width:42px;height:42px;border-radius:6px;margin-right:12px;object-fit:cover;">
-            <div style="background:white; padding:10px 14px; border-radius:4px 14px 14px 14px; max-width:75%; box-shadow:0 1px 3px rgba(0,0,0,0.05); color:#333; font-size:15px;">"""
+            <div style="background:white; padding:10px 14px; border-radius:4px 14px 14px 14px; max-width:75%; box-shadow:0 1px 3px rgba(0,0,0,0.05); color:#333; font-size:15px; line-height:1.5;">"""
         if txt: bubble_html += f"{txt}<br>"
         for img_url in img_urls: bubble_html += f'<img src="{img_url}" style="max-width:100%; height:auto; border-radius:8px; margin-top:5px;"><br>'
         bubble_html += "</div></div>"
@@ -288,91 +302,108 @@ def render_bubble(role, content, avatar, audio_data=None):
     else:
         bubble_html += f"""<div style="display:flex; flex-direction:row-reverse; margin-bottom:15px;">
             <img src="{avatar}" onerror="this.src='{fb}';" style="width:42px;height:42px;border-radius:6px;margin-left:12px;object-fit:cover;">
-            <div style="background:#95ec69; padding:10px 14px; border-radius:14px 4px 14px 14px; max-width:75%; box-shadow:0 1px 3px rgba(0,0,0,0.05); color:#000; font-size:15px;">"""
+            <div style="background:#95ec69; padding:10px 14px; border-radius:14px 4px 14px 14px; max-width:75%; box-shadow:0 1px 3px rgba(0,0,0,0.05); color:#000; font-size:15px; line-height:1.5;">"""
         if txt: bubble_html += f"{txt}<br>"
         for img_url in img_urls: bubble_html += f'<img src="{img_url}" style="max-width:100%; height:auto; border-radius:8px; margin-top:5px;"><br>'
         bubble_html += "</div></div>"
 
     st.markdown(bubble_html, unsafe_allow_html=True)
 
+# 渲染历史记录与时间线
+last_rendered_time = 0
+
 for i, m in enumerate(st.session_state.messages):
     if m["role"] in ["user", "assistant"]:
+
+        # --- 微信时间线逻辑 ---
+        current_msg_time = m.get("timestamp")
+        if current_msg_time:
+            # 如果当前消息和上一条渲染的消息相差大于 300 秒 (5分钟)，则显示时间戳
+            if current_msg_time - last_rendered_time > 300:
+                dt = datetime.datetime.fromtimestamp(current_msg_time, beijing_tz)
+                time_str = dt.strftime("%m月%d日 %H:%M")
+                st.markdown(f"<div style='text-align:center; color:#999; font-size:12px; margin-bottom:10px; margin-top:10px;'>{time_str}</div>", unsafe_allow_html=True)
+            last_rendered_time = current_msg_time
+
+        # --- 渲染气泡 ---
         av = st.session_state.hz_avatar if m["role"] == "assistant" else st.session_state.user_avatar
         audio = st.session_state.get("tts_audio") if m["role"] == "assistant" and i == len(st.session_state.messages) - 1 else None
         render_bubble(m["role"], m["content"], av, audio)
 
 # ==========================================
-# 6. 输入逻辑
+# 6. 输入逻辑 (彻底解决消息闪屏 Bug)
 # ==========================================
-if not st.session_state.get("is_processing", False):
-    with st.popover("➕"):
-        img_in = st.file_uploader("图片", type=["png", "jpg"], key="img_pop")
-        aud_in = st.audio_input("语音", key="aud_pop")
+with st.popover("➕"):
+    img_in = st.file_uploader("图片", type=["png", "jpg"], key="img_pop")
+    aud_in = st.audio_input("语音", key="aud_pop")
 
-    prompt = st.chat_input("宝贝，想对我说什么...")
+prompt = st.chat_input("宝贝，想对我说什么...")
 
-    if prompt or img_in or aud_in:
-        action_key = f"{prompt}_{img_in.name if img_in else ''}_{aud_in.id if aud_in else ''}"
-        if st.session_state.get("last_action") != action_key and action_key != "_":
-            st.session_state.last_action = action_key
-            st.session_state["is_processing"] = True
+# 第一步：只负责接收用户的输入，并把消息存进记录里，然后立刻刷新页面显示出来
+if prompt or img_in or aud_in:
+    action_key = f"{prompt}_{img_in.name if img_in else ''}_{aud_in.id if aud_in else ''}"
+    if st.session_state.get("last_action") != action_key and action_key != "_":
+        st.session_state.last_action = action_key
 
-            # 始终使用最新的超级 Prompt
-            st.session_state.messages[0]["content"] = get_dynamic_prompt(user_name)
+        st.session_state.messages[0]["content"] = get_dynamic_prompt(user_name)
+        user_msg = []
+        if prompt: user_msg.append({"type": "text", "text": prompt})
+        if img_in:
+            b64 = base64.b64encode(img_in.getvalue()).decode()
+            user_msg.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
+        if aud_in:
+            try:
+                res = client.audio.transcriptions.create(model="whisper-1", file=aud_in, response_format="text")
+                user_msg.append({"type": "text", "text": res})
+            except: pass
 
-            user_msg = []
-            if prompt: user_msg.append({"type": "text", "text": prompt})
-            if img_in:
-                b64 = base64.b64encode(img_in.getvalue()).decode()
-                user_msg.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
-            if aud_in:
-                try:
-                    res = client.audio.transcriptions.create(model="whisper-1", file=aud_in, response_format="text")
-                    user_msg.append({"type": "text", "text": res})
-                except: pass
+        if user_msg:
+            # 加入 timestamp 时间戳！
+            st.session_state.messages.append({"role": "user", "content": user_msg, "timestamp": time.time()})
+            st.session_state.needs_response = True
+            update_last_active_time()
+            st.rerun() # 立刻刷新页面，让你的消息以完美状态显示
 
-            if user_msg:
-                st.session_state.messages.append({"role": "user", "content": user_msg})
-                render_bubble("user", user_msg, st.session_state.user_avatar)
+# 第二步：页面刷新后，系统发现需要韩振回复，才开始显示 spinner 和请求网络
+if st.session_state.get("needs_response"):
+    with st.spinner("韩振正在打字..."):
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=st.session_state.messages,
+            tools=tools, tool_choice="auto"
+        )
+        res_msg = response.choices[0].message
 
-                with st.spinner("韩振正在打字..."):
-                    response = client.chat.completions.create(
-                        model="gpt-4o",
-                        messages=st.session_state.messages,
-                        tools=tools, tool_choice="auto"
-                    )
-                    res_msg = response.choices[0].message
+        if res_msg.tool_calls:
+            st.session_state.messages.append(res_msg.model_dump())
+            for call in res_msg.tool_calls:
+                if call.function.name == "search_web":
+                    args = json.loads(call.function.arguments)
+                    res = search_web(args.get("query"))
+                    st.session_state.messages.append({"tool_call_id": call.id, "role": "tool", "name": "search_web", "content": res})
 
-                    if res_msg.tool_calls:
-                        st.session_state.messages.append(res_msg.model_dump())
-                        for call in res_msg.tool_calls:
-                            if call.function.name == "search_web":
-                                args = json.loads(call.function.arguments)
-                                res = search_web(args.get("query"))
-                                st.session_state.messages.append({"tool_call_id": call.id, "role": "tool", "name": "search_web", "content": res})
+            final = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
+            final_reply = final.choices[0].message.content
+        else:
+            final_reply = res_msg.content
 
-                        final = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
-                        final_reply = final.choices[0].message.content
-                    else:
-                        final_reply = res_msg.content
+    # 加入 timestamp 时间戳！
+    st.session_state.messages.append({"role": "assistant", "content": final_reply, "timestamp": time.time()})
+    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(st.session_state.messages, f, ensure_ascii=False)
 
-                st.session_state.messages.append({"role": "assistant", "content": final_reply})
-                with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-                    json.dump(st.session_state.messages, f, ensure_ascii=False)
+    update_last_active_time()
 
-                # 更新最后活跃时间
-                update_last_active_time()
+    if st.session_state.get("enable_tts", False):
+        try:
+            tts_response = client.audio.speech.create(
+                model="tts-1", voice=st.session_state.get("tts_voice", "alloy"), input=final_reply
+            )
+            audio_data = b""
+            for chunk in tts_response.iter_bytes(): audio_data += chunk
+            st.session_state["tts_audio"] = audio_data
+        except Exception as e:
+            st.error(f"OpenAI TTS 生成失败: {e}")
 
-                if st.session_state.get("enable_tts", False):
-                    try:
-                        tts_response = client.audio.speech.create(
-                            model="tts-1", voice=st.session_state.get("tts_voice", "alloy"), input=final_reply
-                        )
-                        audio_data = b""
-                        for chunk in tts_response.iter_bytes(): audio_data += chunk
-                        st.session_state["tts_audio"] = audio_data
-                    except Exception as e:
-                        st.error(f"OpenAI TTS 生成失败: {e}")
-
-                st.session_state["is_processing"] = False
-                st.rerun()
+    st.session_state.needs_response = False
+    st.rerun() # 最后刷新一次页面，显示韩振的回复
