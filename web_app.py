@@ -37,6 +37,7 @@ def save_config():
         "hz_nickname": st.session_state.get("hz_nickname"),
         "enable_tts": st.session_state.get("enable_tts"),
         "tts_voice": st.session_state.get("tts_voice", "alloy")
+
     }
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config_data, f, ensure_ascii=False)
