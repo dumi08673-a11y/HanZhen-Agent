@@ -12,11 +12,6 @@ import pytz
 # ==========================================
 # 0. 基础环境与配置持久化
 # ==========================================
-
-# 💡 这一小段是为了让你的代码在 GitHub 云端也能认得你的 Key
-if "OPENAI_API_KEY" in st.secrets:
-    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
-
 client = OpenAI()
 MEMORY_FILE = "hanzhen_memory.json"
 CONFIG_FILE = "hanzhen_config.json"
@@ -64,8 +59,7 @@ config = load_config()
 # 1. 联网搜索工具
 # ==========================================
 def search_web(query):
-    # 联网搜索也做了云端 Key 兼容
-    api_key = st.secrets.get("TAVILY_API_KEY", os.environ.get("TAVILY_API_KEY"))
+    api_key = os.environ.get("TAVILY_API_KEY")
     if api_key:
         try:
             payload = {"api_key": api_key, "query": query, "include_answer": True}
@@ -277,12 +271,13 @@ def check_and_trigger_proactive_message():
             except: pass
     return False
 
+# 每次刷新页面时检测
 if not st.session_state.get("needs_response", False):
     if check_and_trigger_proactive_message():
         st.rerun()
 
 # ==========================================
-# 5. 消息渲染
+# 5. 消息渲染 (加入微信时间线)
 # ==========================================
 def render_bubble(role, content, avatar, audio_data=None):
     if content is None: return
@@ -314,24 +309,29 @@ def render_bubble(role, content, avatar, audio_data=None):
 
     st.markdown(bubble_html, unsafe_allow_html=True)
 
+# 渲染历史记录与时间线
 last_rendered_time = 0
 
 for i, m in enumerate(st.session_state.messages):
     if m["role"] in ["user", "assistant"]:
+
+        # --- 微信时间线逻辑 ---
         current_msg_time = m.get("timestamp")
         if current_msg_time:
+            # 如果当前消息和上一条渲染的消息相差大于 300 秒 (5分钟)，则显示时间戳
             if current_msg_time - last_rendered_time > 300:
                 dt = datetime.datetime.fromtimestamp(current_msg_time, beijing_tz)
                 time_str = dt.strftime("%m月%d日 %H:%M")
                 st.markdown(f"<div style='text-align:center; color:#999; font-size:12px; margin-bottom:10px; margin-top:10px;'>{time_str}</div>", unsafe_allow_html=True)
             last_rendered_time = current_msg_time
 
+        # --- 渲染气泡 ---
         av = st.session_state.hz_avatar if m["role"] == "assistant" else st.session_state.user_avatar
         audio = st.session_state.get("tts_audio") if m["role"] == "assistant" and i == len(st.session_state.messages) - 1 else None
         render_bubble(m["role"], m["content"], av, audio)
 
 # ==========================================
-# 6. 输入逻辑
+# 6. 输入逻辑 (彻底解决消息闪屏 Bug)
 # ==========================================
 with st.popover("➕"):
     img_in = st.file_uploader("图片", type=["png", "jpg"], key="img_pop")
@@ -339,10 +339,12 @@ with st.popover("➕"):
 
 prompt = st.chat_input("宝贝，想对我说什么...")
 
+# 第一步：只负责接收用户的输入，并把消息存进记录里，然后立刻刷新页面显示出来
 if prompt or img_in or aud_in:
-    action_key = f"{prompt}_{img_in.name if img_in else ''}"
-    if st.session_state.get("last_action") != action_key:
+    action_key = f"{prompt}_{img_in.name if img_in else ''}_{aud_in.id if aud_in else ''}"
+    if st.session_state.get("last_action") != action_key and action_key != "_":
         st.session_state.last_action = action_key
+
         st.session_state.messages[0]["content"] = get_dynamic_prompt(user_name)
         user_msg = []
         if prompt: user_msg.append({"type": "text", "text": prompt})
@@ -356,10 +358,13 @@ if prompt or img_in or aud_in:
             except: pass
 
         if user_msg:
+            # 加入 timestamp 时间戳！
             st.session_state.messages.append({"role": "user", "content": user_msg, "timestamp": time.time()})
             st.session_state.needs_response = True
-            update_last_active_time(); st.rerun()
+            update_last_active_time()
+            st.rerun() # 立刻刷新页面，让你的消息以完美状态显示
 
+# 第二步：页面刷新后，系统发现需要韩振回复，才开始显示 spinner 和请求网络
 if st.session_state.get("needs_response"):
     with st.spinner("韩振正在打字..."):
         response = client.chat.completions.create(
@@ -368,6 +373,7 @@ if st.session_state.get("needs_response"):
             tools=tools, tool_choice="auto"
         )
         res_msg = response.choices[0].message
+
         if res_msg.tool_calls:
             st.session_state.messages.append(res_msg.model_dump())
             for call in res_msg.tool_calls:
@@ -375,21 +381,29 @@ if st.session_state.get("needs_response"):
                     args = json.loads(call.function.arguments)
                     res = search_web(args.get("query"))
                     st.session_state.messages.append({"tool_call_id": call.id, "role": "tool", "name": "search_web", "content": res})
+
             final = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
             final_reply = final.choices[0].message.content
         else:
             final_reply = res_msg.content
 
+    # 加入 timestamp 时间戳！
     st.session_state.messages.append({"role": "assistant", "content": final_reply, "timestamp": time.time()})
     with open(MEMORY_FILE, "w", encoding="utf-8") as f:
         json.dump(st.session_state.messages, f, ensure_ascii=False)
+
     update_last_active_time()
 
     if st.session_state.get("enable_tts", False):
         try:
-            tts_res = client.audio.speech.create(model="tts-1", voice=st.session_state.get("tts_voice", "alloy"), input=final_reply)
-            st.session_state["tts_audio"] = tts_res.read()
-        except: pass
+            tts_response = client.audio.speech.create(
+                model="tts-1", voice=st.session_state.get("tts_voice", "alloy"), input=final_reply
+            )
+            audio_data = b""
+            for chunk in tts_response.iter_bytes(): audio_data += chunk
+            st.session_state["tts_audio"] = audio_data
+        except Exception as e:
+            st.error(f"OpenAI TTS 生成失败: {e}")
 
     st.session_state.needs_response = False
-    st.rerun()
+    st.rerun() # 最后刷新一次页面，显示韩振的回复
